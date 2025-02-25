@@ -17,16 +17,19 @@ FACE_PATH = 'database/faces/'
 # Initialize MTCNN and InceptionResnetV1 models
 mtcnn = MTCNN()
 resnet = InceptionResnetV1(pretrained='vggface2').eval()
-model_face = torch.hub.load('ultralytics/yolov5', 'custom', path='faceNew.pt', force_reload=False)
-model_eye = torch.hub.load('ultralytics/yolov5', 'custom', path='eye.pt', force_reload=False)
+model_face = torch.hub.load(
+    'ultralytics/yolov5', 'custom', path='faceNew.pt', force_reload=False)
+model_eye = torch.hub.load(
+    'ultralytics/yolov5', 'custom', path='eye.pt', force_reload=False)
 model_eye.conf = 0.6
 
-FACE_SIMILARITY_THRESHOLD = 0.9
+FACE_SIMILARITY_THRESHOLD = 0.75
 OVERLAP_THRESHOLD = 0.93
+
 
 def detect_for_frame(frame, face, is_blink, fake_blink, eye_state, prev_frame_face, prev_face):
 
-    #detect face for frame
+    # detect face for frame
     results_face = model_face(frame)
 
     # Get the bounding box coordinates and labels
@@ -36,58 +39,60 @@ def detect_for_frame(frame, face, is_blink, fake_blink, eye_state, prev_frame_fa
     if bboxes.size != 0:
         # only get bounding box with biggest area
         if bboxes.size > 1:
-            area = (bboxes[:, 2] - bboxes[:, 0]) * (bboxes[:, 3] - bboxes[:, 1])
+            area = (bboxes[:, 2] - bboxes[:, 0]) * \
+                (bboxes[:, 3] - bboxes[:, 1])
             bboxes = bboxes[area.argmax()]
-        
-        #get current face bounding box
+
+        # get current face bounding box
         current_frame_face = bboxes[:4]
 
         x1, y1, x2, y2 = [int(val) for val in bboxes[:4]]
 
         # Draw the bounding box
-        cv2.rectangle(frame, (x1, y1), (x2, y2), chooseColor(is_blink, fake_blink), 2)
+        cv2.rectangle(frame, (x1, y1), (x2, y2),
+                      chooseColor(is_blink, fake_blink), 2)
 
         temp_face = frame[y1:y2, x1:x2]
         face = temp_face.copy()
-        
-        #detect eye in the box region
+
+        # detect eye in the box region
         results_eye = model_eye(temp_face)
 
         # Get the bounding box coordinates and labels
         bboxes = results_eye.xyxy[0].cpu().numpy()
         state = [bbox[5] for bbox in bboxes]
         labels = results_eye.names
-        
+
         if is_blink and not fake_blink:
             return frame, face[2:-2, 2:-2], is_blink, fake_blink, eye_state, prev_frame_face, prev_face
 
-        
         offsets = [x1, y1, x1, y1]
 
-        #if there are two eyes and both are the same state
+        # if there are two eyes and both are the same state
         if len(bboxes) == 2 and state[0] == state[1]:
-            
 
             for bbox in bboxes:
-                x1, y1, x2, y2 = [(int(val) + offset) for val, offset in zip(bbox[:4], offsets)]
+                x1, y1, x2, y2 = [(int(val) + offset)
+                                  for val, offset in zip(bbox[:4], offsets)]
                 # Draw the bounding box
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
 
                 # Draw the label
                 label_text = f"{labels[int(bbox[5])]} {bbox[4]:.2f}"
-                cv2.putText(frame, label_text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (36, 255, 12), 2)
-                
-                #if that eye is a new state
+                cv2.putText(frame, label_text, (x1, y1 - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (36, 255, 12), 2)
+
+                # if that eye is a new state
                 if (bbox[5] not in eye_state):
                     eye_state.append(bbox[5])
 
-                #if all state happened
+                # if all state happened
             if len(eye_state) == 2:
-                    #current_face_area = (current_frame_face[2] - current_frame_face[0]) * (current_frame_face[3] - current_frame_face[1])
-                    #prev_face_area = (prev_frame_face[2] - prev_frame_face[0]) * (prev_frame_face[3] - prev_frame_face[1])
-                    
+                # current_face_area = (current_frame_face[2] - current_frame_face[0]) * (current_frame_face[3] - current_frame_face[1])
+                # prev_face_area = (prev_frame_face[2] - prev_frame_face[0]) * (prev_frame_face[3] - prev_frame_face[1])
+
                 if not is_blink:
-                    
+
                     if calculate_overlap(current_frame_face, prev_frame_face) > OVERLAP_THRESHOLD and prev_face is not None:
                         face_similarity = isTheSameFace(face, prev_face)
                         if face_similarity > FACE_SIMILARITY_THRESHOLD:
@@ -97,9 +102,10 @@ def detect_for_frame(frame, face, is_blink, fake_blink, eye_state, prev_frame_fa
                             print(face_similarity)
                         else:
                             prev_face = None
-                            print(f"Nice try but {face_similarity} is not similar to previous face")
+                            print(
+                                f"Nice try but {face_similarity} is not similar to previous face")
                             eye_state = []
-                        #fake_blink = False
+                        # fake_blink = False
                     else:
                         eye_state = []
                         fake_blink = True
@@ -118,7 +124,6 @@ def detect_for_frame(frame, face, is_blink, fake_blink, eye_state, prev_frame_fa
         face = None
         prev_face = None
 
-
     if face is not None:
         return frame, face[2:-2, 2:-2], is_blink, fake_blink, eye_state, prev_frame_face, prev_face
     else:
@@ -130,29 +135,31 @@ def extractFeature(face):
     embeddings = resnet(img_tensor.unsqueeze(0)).detach()
     return embeddings
 
+
 def addFaceToDatabase(face, name):
 
-    #Add face image to image database
+    # Add face image to image database
     cv2.imwrite(os.path.join(FACE_PATH, name+'.png'), face)
 
-    #Open json database
+    # Open json database
     with open(DATABASE_PATH, 'r') as file:
         data = json.load(file)
 
-    #Add face data to json database
+    # Add face data to json database
     new_data = {
         "id": data["numUser"],
         "name": name,
         "feature": extractFeature(face).tolist()
     }
 
-    #Update json database
+    # Update json database
     data["numUser"] += 1
     data["features"].append(new_data)
 
-    #Write json database
+    # Write json database
     with open(DATABASE_PATH, 'w') as file:
         json.dump(data, file, indent=4)
+
 
 def faceMatching(face):
     embeddings = extractFeature(face)
@@ -167,11 +174,13 @@ def faceMatching(face):
             read_names.append(user["name"])
 
     for i in range(len(read_features)):
-        similarity.append(cosine_similarity(embeddings.squeeze(), read_features[i].squeeze()))
+        similarity.append(cosine_similarity(
+            embeddings.squeeze(), read_features[i].squeeze()))
     print(read_names)
     print(similarity)
     max_index = similarity.index(max(similarity))
     return read_names[max_index], max(similarity)
+
 
 def isTheSameFace(face1, face2):
     feature_1 = extractFeature(face1)
